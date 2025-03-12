@@ -1,6 +1,9 @@
+use eyre::eyre;
 use std::env;
 use std::mem::size_of;
 use tracing::debug;
+use tracing::info;
+use tracing::warn;
 use windows::Win32::Foundation::GetLastError;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Foundation::HINSTANCE;
@@ -77,4 +80,27 @@ pub fn relaunch_as_admin() -> Result<HINSTANCE, windows::core::Error> {
     } else {
         Err(windows::core::Error::from_win32())
     }
+}
+
+pub fn ensure_elevated() -> eyre::Result<()> {
+    if !is_elevated() {
+        warn!("Program needs to be ran with elevated privileges.");
+        info!("Relaunching as administrator");
+        match relaunch_as_admin() {
+            Ok(module) if module.0 as usize > 32 => {
+                info!("Successfully relaunched as administrator.");
+                std::process::exit(0); // Exit the current process
+            }
+            Ok(module) => {
+                return Err(eyre!(
+                    "Failed to relaunch as administrator. Error code: {}",
+                    module.0 as usize
+                ));
+            }
+            Err(e) => {
+                return Err(eyre!("Failed to relaunch as administrator: {}", e));
+            }
+        }
+    }
+    Ok(())
 }

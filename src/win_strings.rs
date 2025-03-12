@@ -1,6 +1,11 @@
 use std::ffi::OsStr;
 use std::iter::once;
 use std::os::windows::ffi::OsStrExt;
+use windows::core::PCWSTR;
+use windows::core::w;
+
+pub const MACHINE_ENV_SUB_KEY: PCWSTR =
+    w!("SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment");
 
 /// Converts a Rust `&str` to a null-terminated wide string (`Vec<u16>`).
 pub fn to_wide_null(s: &str) -> Vec<u16> {
@@ -11,7 +16,7 @@ pub fn to_wide_null(s: &str) -> Vec<u16> {
 }
 
 /// Convert pairs of bytes to UTF-16, then to a Rust string. Stop at the first null terminator.
-pub fn utf16_from_byte_slice(bytes: &[u8]) -> String {
+pub fn utf16_from_bytes(bytes: &[u8]) -> String {
     let wide_data: Vec<u16> = bytes
         .chunks_exact(2)
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))

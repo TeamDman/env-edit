@@ -1,11 +1,16 @@
+use crate::win_strings::utf16_from_bytes;
+use crate::win_strings::MACHINE_ENV_SUB_KEY;
 use eyre::bail;
 use eyre::eyre;
+use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
 use windows::Win32::Foundation::ERROR_MORE_DATA;
 use windows::Win32::Foundation::ERROR_NO_MORE_ITEMS;
 use windows::Win32::Foundation::ERROR_SUCCESS;
+use windows::Win32::Foundation::WIN32_ERROR;
 use windows::Win32::System::Environment::ExpandEnvironmentStringsW;
 use windows::Win32::System::Registry::HKEY;
 use windows::Win32::System::Registry::HKEY_LOCAL_MACHINE;
+use windows::Win32::System::Registry::KEY_QUERY_VALUE;
 use windows::Win32::System::Registry::KEY_READ;
 use windows::Win32::System::Registry::REG_EXPAND_SZ;
 use windows::Win32::System::Registry::REG_SZ;
@@ -13,16 +18,22 @@ use windows::Win32::System::Registry::REG_VALUE_TYPE;
 use windows::Win32::System::Registry::RegCloseKey;
 use windows::Win32::System::Registry::RegEnumValueW;
 use windows::Win32::System::Registry::RegOpenKeyExW;
-use windows::core::*;
+use windows::Win32::System::Registry::RegQueryValueExW;
+use windows::core::PCWSTR;
+use windows::core::PWSTR;
 
-use crate::win_strings::utf16_from_byte_slice;
 
-pub fn get_machine_env() -> eyre::Result<Vec<EnvironmentVariable>> {
-    let sub_key = w!("SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment");
-
+pub fn list_machine_env_var() -> eyre::Result<Vec<EnvironmentVariable>> {
     let mut hkey: HKEY = HKEY::default();
     unsafe {
-        RegOpenKeyExW(HKEY_LOCAL_MACHINE, sub_key, None, KEY_READ, &mut hkey).ok()?;
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            MACHINE_ENV_SUB_KEY,
+            None,
+            KEY_READ,
+            &mut hkey,
+        )
+        .ok()?;
     }
 
     let rtn = try {
@@ -104,6 +115,82 @@ pub fn get_machine_env() -> eyre::Result<Vec<EnvironmentVariable>> {
     rtn
 }
 
+/// Retrieve a machine-level environment variable value (if it exists).
+/// Returns `Ok(None)` if the key was not found, or `Ok(Some(value))` otherwise.
+pub fn get_machine_env_var(var_name: &str) -> eyre::Result<Option<String>> {
+    // Windows registry calls typically want a wide (UTF-16) string with a null terminator
+    let wide_name: Vec<u16> = var_name.encode_utf16().chain(std::iter::once(0)).collect();
+
+    unsafe {
+        // Open the environment sub-key with KEY_QUERY_VALUE
+        let mut hkey: HKEY = HKEY::default();
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            MACHINE_ENV_SUB_KEY,
+            None,
+            KEY_QUERY_VALUE,
+            &mut hkey,
+        )
+        .ok()?;
+
+        // We'll call RegQueryValueExW to get data size first
+        let mut value_type = REG_VALUE_TYPE(0);
+        let mut data_len: u32 = 0;
+        let query_status = RegQueryValueExW(
+            hkey,
+            PCWSTR(wide_name.as_ptr()),
+            None,
+            Some(&mut value_type),
+            None, // pass None to query the size needed
+            Some(&mut data_len),
+        );
+
+        if let Err(e) = query_status.ok() {
+            let code = WIN32_ERROR::from_error(&e).map(|c| c.0).unwrap_or_default();
+            if code == ERROR_FILE_NOT_FOUND.0 {
+                // Key does not exist
+                RegCloseKey(hkey).ok()?;
+                return Ok(None);
+            } else {
+                // Some other error
+                RegCloseKey(hkey).ok()?;
+                return Err(eyre!(
+                    "Failed to query size for '{var_name}', code=0x{code:X}"
+                ));
+            }
+        }
+
+        // If data_len == 0, either the value is empty or something is off
+        // We'll consider that as an empty string
+        if data_len == 0 {
+            RegCloseKey(hkey).ok()?;
+            return Ok(Some(String::new()));
+        }
+
+        // Allocate a buffer for the actual data
+        let mut data_buf = vec![0u8; data_len as usize];
+        RegQueryValueExW(
+            hkey,
+            PCWSTR(wide_name.as_ptr()),
+            None,
+            Some(&mut value_type),
+            Some(data_buf.as_mut_ptr()),
+            Some(&mut data_len),
+        )
+        .ok()?;
+
+        RegCloseKey(hkey).ok()?;
+
+        // We only handle REG_SZ or REG_EXPAND_SZ in this example
+        if value_type != REG_SZ {
+            // If you also expect REG_EXPAND_SZ, you could handle that,
+            // but for simplicity we just show REG_SZ
+            return Ok(Some(utf16_from_bytes(&data_buf)));
+        }
+        Ok(Some(utf16_from_bytes(&data_buf)))
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EnvironmentVariable {
     pub key: String,
@@ -132,7 +219,7 @@ fn process_value(
 
     match value_type {
         REG_SZ => {
-            let value = utf16_from_byte_slice(data_bytes);
+            let value = utf16_from_bytes(data_bytes);
             return Ok(EnvironmentVariable {
                 key: name,
                 value,
@@ -142,7 +229,7 @@ fn process_value(
             // println!("{name} (REG_SZ) = {data_str}");
         }
         REG_EXPAND_SZ => {
-            let value = utf16_from_byte_slice(data_bytes);
+            let value = utf16_from_bytes(data_bytes);
             let expanded = expand_env_wstring(&value);
             // println!("{name} (REG_EXPAND_SZ) = {raw_str}");
             // println!("                   expanded => {expanded}");
