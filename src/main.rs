@@ -4,12 +4,16 @@ use env_edit::env_writer::set_machine_env_var;
 use env_edit::init::init;
 use env_edit::win_elevation::ensure_elevated;
 use tracing::info;
+
 fn main() -> eyre::Result<()> {
     init()?;
-    ensure_elevated()?;
     info!("Hello, world!");
 
     do_stuff()?;
+
+    ensure_elevated()?;
+
+    do_admin_stuff()?;
 
     info!("We have reached the end of the program.");
     wait_for_enter();
@@ -19,10 +23,12 @@ fn main() -> eyre::Result<()> {
 fn do_stuff() -> eyre::Result<()> {
     // 1) Print out all machine environment variables
     let environment_variables = list_machine_env_var()?;
-    for env_var in environment_variables {
-        println!("{:?}", env_var);
-    }
+    let dump = serde_json::to_string_pretty(&environment_variables)?;
+    println!("{}", dump);
+    Ok(())
+}
 
+fn do_admin_stuff() -> eyre::Result<()> {
     // 2) Our test: "ENV_EDIT_TEST"
     //    If it doesn't exist, set to "0".
     //    If it does exist, parse as integer, increment by 1, and update it.

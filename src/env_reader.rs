@@ -2,6 +2,8 @@ use crate::win_strings::utf16_from_bytes;
 use crate::win_strings::MACHINE_ENV_SUB_KEY;
 use eyre::bail;
 use eyre::eyre;
+use serde::Deserialize;
+use serde::Serialize;
 use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
 use windows::Win32::Foundation::ERROR_MORE_DATA;
 use windows::Win32::Foundation::ERROR_NO_MORE_ITEMS;
@@ -191,11 +193,12 @@ pub fn get_machine_env_var(var_name: &str) -> eyre::Result<Option<String>> {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EnvironmentVariable {
     pub key: String,
     pub value: String,
     pub value_expanded: Option<String>,
+    #[serde(skip)]
     pub kind: REG_VALUE_TYPE,
 }
 impl EnvironmentVariable {
