@@ -18,13 +18,13 @@ pub fn init() -> eyre::Result<()> {
 
 #[cfg(windows)]
 mod windows_ansi {
-    use windows::core::Result;
     use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Console::ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     use windows::Win32::System::Console::GetConsoleMode;
     use windows::Win32::System::Console::GetStdHandle;
-    use windows::Win32::System::Console::SetConsoleMode;
-    use windows::Win32::System::Console::ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     use windows::Win32::System::Console::STD_OUTPUT_HANDLE;
+    use windows::Win32::System::Console::SetConsoleMode;
+    use windows::core::Result;
 
     pub fn enable_ansi_support() -> Result<()> {
         unsafe {
@@ -61,5 +61,8 @@ fn init_logging() {
             .parse()
             .unwrap(),
         );
-    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_writer(std::io::stderr)
+        .init();
 }

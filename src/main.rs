@@ -5,56 +5,95 @@ use env_edit::init::init;
 use env_edit::win_elevation::ensure_elevated;
 use tracing::info;
 
+use clap::Parser;
+use clap::Subcommand;
+
+#[derive(Parser)]
+#[command(
+    name = "env-edit",
+    version,
+    about = "Edits machine-level environment variables"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Lists all machine environment variables
+    List,
+    /// Shows a single machine environment variable by name
+    Show {
+        #[arg(long)]
+        key: String,
+    },
+    /// Sets a machine environment variable
+    Set {
+        #[arg(long)]
+        key: String,
+        #[arg(long)]
+        value: String,
+    },
+}
+
 fn main() -> eyre::Result<()> {
     init()?;
-    info!("Hello, world!");
 
-    do_stuff()?;
+    // Parse CLI
+    let cli = Cli::parse();
 
-    ensure_elevated()?;
+    // We only need elevation if we plan to modify registry
+    match &cli.command {
+        Commands::List | Commands::Show { .. } => {
+            // read-only, so we can run without admin rights
+        }
+        Commands::Set { .. } => {
+            // ensure elevated
+            ensure_elevated()?;
+        }
+    };
 
-    do_admin_stuff()?;
+    match cli.command {
+        Commands::List => cmd_list()?,
+        Commands::Show { key } => cmd_show(&key)?,
+        Commands::Set { key, value } => cmd_set(&key, &value)?,
+    }
 
-    info!("We have reached the end of the program.");
+    info!("Done!");
     wait_for_enter();
     Ok(())
 }
 
-fn do_stuff() -> eyre::Result<()> {
-    // 1) Print out all machine environment variables
+fn cmd_list() -> eyre::Result<()> {
     let environment_variables = list_machine_env_var()?;
     let dump = serde_json::to_string_pretty(&environment_variables)?;
-    println!("{}", dump);
+    println!("{dump}");
     Ok(())
 }
 
-fn do_admin_stuff() -> eyre::Result<()> {
-    // 2) Our test: "ENV_EDIT_TEST"
-    //    If it doesn't exist, set to "0".
-    //    If it does exist, parse as integer, increment by 1, and update it.
-    test_env_edit_test()?;
+fn cmd_show(key_name: &str) -> eyre::Result<()> {
+    match get_machine_env_var(key_name)? {
+        Some(value) => {
+            println!("{} = {}", key_name, value);
+        }
+        None => {
+            println!("{} is not set.", key_name);
+        }
+    }
     Ok(())
 }
 
-fn test_env_edit_test() -> eyre::Result<()> {
-    let key_name = "ENV_EDIT_TEST";
-
-    // Try to get the current value of ENV_EDIT_TEST
-    let maybe_value = get_machine_env_var(key_name)?;
-    let current_int = match maybe_value {
-        None => 0, // Key did not exist
-        Some(ref s) => s.parse::<i64>().unwrap_or(0),
-    };
-    let next_int = current_int + 1;
-
-    set_machine_env_var(key_name, &next_int.to_string())?;
-    info!("Set {key_name} to {next_int}");
+fn cmd_set(key_name: &str, value: &str) -> eyre::Result<()> {
+    // Because we've already done ensure_elevated(), we are definitely admin by now
+    set_machine_env_var(key_name, value)?;
+    info!("Set {key_name} to {value}");
     Ok(())
 }
 
 /// Waits for the user to press Enter.
 pub fn wait_for_enter() {
-    print!("Press Enter to exit...");
+    eprint!("Press Enter to exit...");
     std::io::Write::flush(&mut std::io::stdout()).unwrap(); // Ensure the prompt is displayed immediately
     let _ = std::io::stdin().read_line(&mut String::new()); // Wait for user input
 }
